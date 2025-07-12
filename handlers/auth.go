@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"golang_API/db"
 	"golang_API/models"
@@ -27,10 +28,11 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 
 	LogInfo(UserLogger, "Login attempt", "Username: "+req.Username)
 
-	// Query database for user password and role
+	// Query database for user ID, password and role
+	var userID int
 	var password string
 	var role string
-	err := db.DB.QueryRow("SELECT password, role FROM users WHERE username = ?", req.Username).Scan(&password, &role)
+	err := db.DB.QueryRow("SELECT id, password, role FROM users WHERE username = ?", req.Username).Scan(&userID, &password, &role)
 	if err == sql.ErrNoRows {
 		// User not found in database
 		LogSecurityEvent(UserLogger, "Login failed", "User not found: "+req.Username, r.RemoteAddr)
@@ -51,6 +53,14 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Generate JWT token
+	token, err := generateSimpleToken(userID, req.Username, role)
+	if err != nil {
+		LogError(UserLogger, "Token generation", err, "Login for user: "+req.Username)
+		http.Error(w, "❌ Token generation failed", http.StatusInternalServerError)
+		return
+	}
+
 	// Login successful
 	LogSuccess(UserLogger, "User login", "User: "+req.Username+", Role: "+role)
 	LogPerformance(UserLogger, "Login", time.Since(start), "User: "+req.Username)
@@ -59,6 +69,7 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 		Success: true,
 		Message: "✅ เข้าสู่ระบบสำเร็จ",
 		Role:    role,
+		Token:   token,
 	}
 	json.NewEncoder(w).Encode(response)
 }
@@ -175,4 +186,25 @@ func LogoutHandler(w http.ResponseWriter, r *http.Request) {
 
 	LogSuccess(UserLogger, "User logout", "User logged out successfully")
 	json.NewEncoder(w).Encode(models.LogoutResponse{Success: true, Message: "✅ ออกจากระบบสำเร็จ"})
+}
+
+// generateSimpleToken creates a simple token for authentication
+func generateSimpleToken(userID int, username, role string) (string, error) {
+	// Create a simple token with user info and expiration
+	tokenData := map[string]interface{}{
+		"user_id":  userID,
+		"username": username,
+		"role":     role,
+		"exp":      time.Now().Add(24 * time.Hour).Unix(),
+	}
+
+	// Convert to JSON
+	tokenJSON, err := json.Marshal(tokenData)
+	if err != nil {
+		return "", err
+	}
+
+	// Encode to base64
+	token := base64.StdEncoding.EncodeToString(tokenJSON)
+	return token, nil
 }

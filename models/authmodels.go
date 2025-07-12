@@ -9,6 +9,7 @@ type LoginResponse struct {
 	Success bool   `json:"success"`
 	Message string `json:"message"`
 	Role    string `json:"role,omitempty"`
+	Token   string `json:"token,omitempty"`
 }
 
 type RegisterRequest struct {
